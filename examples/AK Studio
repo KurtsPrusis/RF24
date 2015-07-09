@@ -230,16 +230,29 @@ if(role == Box){
 
         // For each button, if the button now on, then toggle the LED
         int i = num_led_pins;
+        int pin = 7;
         while(i--)
         {
-          if ( data[i] )
-          {
-            led_states[i] ^= HIGH;
-            digitalWrite(led_pins[i],led_states[i]);
-          }
+         
+            if ( data[i] )
+           {
+            //led_states[i] ^= HIGH;
+            digitalWrite(pin,HIGH);
+            //printf("Iam in\r" );
+           }
+           else{
+            digitalWrite(pin,LOW);
+           }
+           pin-- ;
+           if (pin == 6)
+           {
+            analogWrite(3, data[4]);
+            printf("write %02x",data[4]);
+           }
+          
         }
       }
-    }
+    } 
      
      /*while(radio.available()){       
       radio.read(&data,5);
