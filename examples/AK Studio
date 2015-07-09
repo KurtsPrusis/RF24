@@ -17,26 +17,46 @@ TMRh20 2014
 
 /*************  USER Configuration *****************************/
                                           // Hardware configuration
-RF24 radio(9,10);                        // Set up nRF24L01 radio on SPI bus plus pins 8 & 9
+RF24 radio(9,10);                        // Set up nRF24L01 radio on SPI bus plus pins 9 & 10
+
+const int role_pin = A4;
+
+// Pins on the remote for buttons
+const uint8_t button_pins[] = { 3,4,5,6 };
+const uint8_t num_button_pins = sizeof(button_pins);
+
+// Pins on the LED board for LED's
+const uint8_t led_pins[] = { 4,5,6,7 };
+const uint8_t num_led_pins = sizeof(led_pins);
 
 /***************************************************************/
 
 const uint64_t pipes[2] = { 0xABCDABCD71LL, 0x544d52687CLL };   // Radio pipe addresses for the 2 nodes to communicate.
 
-byte data[32];                           //Data buffer for testing data transfer speeds
+byte data[5];                           //Data buffer for testing data transfer speeds
 
 unsigned long counter, rxTimer;          //Counter and timer for keeping track transfer info
 unsigned long startTime, stopTime;  
-bool TX=1,RX=0,role=0;
+bool Remote=1,Box=0,role=0;
 
 void setup(void) {
 
-/*
-  // The UNO Adapter uses pin 10 as Vcc
-  pinMode(10,OUTPUT);
-  digitalWrite(10,HIGH);
-  delay(500);
-*/
+  //
+  // Role
+  //
+
+  // set up the role pin
+  pinMode(role_pin, INPUT);
+  digitalWrite(role_pin,HIGH);
+  delay(20); // Just to get a solid reading on the role pin
+
+  // read the address pin, establish our role
+  if ( digitalRead(role_pin) )
+    role = Remote;
+  else
+    role = Box;
+
+
 
   Serial.begin(57600);
   printf_begin();
@@ -54,27 +74,109 @@ void setup(void) {
   radio.startListening();                 // Start listening
   radio.printDetails();                   // Dump the configuration of the rf unit for debugging
   
-  printf("\n\rRF24/examples/Transfer Rates/\n\r");
-  printf("*** PRESS 'T' to begin transmitting to the other node\n\r");
   
+  printf("\n\rAK Studio Relay Box /\n\r");
+  /*
   randomSeed(analogRead(0));              //Seed for random number generation
   
   for(int i=0; i<32; i++){
      data[i] = random(255);               //Load the buffer with random data
   }
+*/
+   if ( role ==Rremote )
+  {
+    radio.openWritingPipe(pipe);
+  }
+  else
+  {
+    radio.openReadingPipe(1,pipe);
+  }
+
+  //
+  // Start listening
+  //
+
+  if ( role == Box )
+    radio.startListening();
+
+  //
+  // Dump the configuration of the rf unit for debugging
+  //
+
+  radio.printDetails();
+
+  //
+  // Set up buttons / LED's
+  //
+  
+  // Set pull-up resistors for all buttons
+  if ( role == Remote )
+  {
+    int i = num_button_pins; 
+    while(i--)
+    {
+      pinMode(button_pins[i],INPUT);
+      digitalWrite(button_pins[i],HIGH);
+    }
+  }
+
+  // Turn LED's ON until we start getting keys
+  if ( role == Box )
+  {
+    int i = num_led_pins;
+    while(i--)
+    {
+      pinMode(led_pins[i],OUTPUT);
+      data[i] = HIGH;
+      digitalWrite(led_pins[i],data[i]);
+    }
+  }
+
+  
   radio.powerUp();                        //Power up the radio
 }
+
+//------------------------LOOP--------------------------//
 
 void loop(void){
 
 
-  if(role == TX){
+  if(role == Remote){
     
-    delay(2000);
+    //delay(2000);
     
-    printf("Initiating Basic Data Transfer\n\r");
+    //printf("Initiating Basic Data Transfer\n\r");
     
-    
+        // Get the current state of buttons, and
+    // Test if the current state is different from the last state we sent
+    int i = num_button_pins;
+    bool different = false;
+    while(i--)
+    {
+      uint8_t state = ! digitalRead(button_pins[i]);
+      if ( state != button_states[i] )
+      {
+        different = true;
+        data[i] = state;
+      }
+    }
+
+    // Send the state of the buttons to the LED board
+    if ( different )
+    {
+      randomSeed(analogRead(0));              //Seed for random number generation
+      data[4] = random(255);
+      printf("Now sending...");
+      bool ok = radio.write( data, 5 );
+      if (ok)
+        printf("ok\n\r");
+      else
+        printf("failed\n\r");
+    }
+
+    // Try again in a short while
+    delay(20);
+    /*
     unsigned long cycles = 10000; //Change this to a higher or lower number. 
     
     startTime = millis();
@@ -99,21 +201,48 @@ void loop(void){
                                          //This should be called to wait for completion and put the radio in standby mode after transmission, returns 0 if data still in FIFO (timed out), 1 if success
    if(!radio.txStandBy()){ counter+=3; } //Standby, block only until FIFO empty or auto-retry timeout. Flush TX FIFO if failed
    //radio.txStandBy(1000);              //Standby, using extended timeout period of 1 second
-   
+   */
+   /*
    float numBytes = cycles*32;
    float rate = numBytes / (stopTime - startTime);
     
    Serial.print("Transfer complete at "); Serial.print(rate); printf(" KB/s \n\r");
    Serial.print(counter); Serial.print(" of "); Serial.print(cycles); printf(" Packets Failed to Send\n\r");
    counter = 0;   
+    */
     
    }
   
   
   
-if(role == RX){
-     while(radio.available()){       
-      radio.read(&data,32);
+if(role == Box){
+     // if there is data ready
+    if ( radio.available() )
+    {
+      // Dump the payloads until we've gotten everything
+      while (radio.available())
+      {
+        // Fetch the payload, and see if this was the last one.
+        radio.read( button_states, num_button_pins );
+
+        // Spew it
+        printf("Got buttons\n\r");
+
+        // For each button, if the button now on, then toggle the LED
+        int i = num_led_pins;
+        while(i--)
+        {
+          if ( data[i] )
+          {
+            led_states[i] ^= HIGH;
+            digitalWrite(led_pins[i],led_states[i]);
+          }
+        }
+      }
+    }
+     
+     /*while(radio.available()){       
+      radio.read(&data,5);
       counter++;
      }
    if(millis() - rxTimer > 1000){
@@ -123,12 +252,13 @@ if(role == RX){
      Serial.print(numBytes);
      printf("KB/s \n Payload Count: %d \n\r", counter);
      counter = 0;
-   }
+   }*/
+   
   }
   //
   // Change roles
   //
-
+/*
   if ( Serial.available() )
   {
     char c = toupper(Serial.read());
@@ -148,7 +278,7 @@ if(role == RX){
       printf("*** CHANGING TO RECEIVE ROLE -- PRESS 'T' TO SWITCH BACK\n\r");      
       role = RX;                // Become the primary receiver (pong back)
     }
-  }
+  }*/
 }
 
     Status API Training Shop Blog About Help 
